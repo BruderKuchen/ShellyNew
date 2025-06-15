@@ -9,8 +9,8 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
-from core.models import Base, ShellyStatus, User, RoleEnum, UserCreate, UserRead, ShellyStatusRead
-from core.database import SessionLocal, engine
+from models import Base, ShellyStatus, User, RoleEnum, UserCreate, UserRead, ShellyStatusRead
+from database import SessionLocal, engine
 
 # --------------------------------------------------
 #  Environment & Security-Setup
