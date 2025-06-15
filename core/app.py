@@ -1,146 +1,107 @@
-import os, time
-from datetime import datetime, timedelta
+from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
+from sqlalchemy.orm import Session
+from typing import List
+import os
 
-from fastapi import FastAPI, HTTPException, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from pydantic import BaseModel
+# Import your models and schemas
+from core.models import Base, engine, SessionLocal, ShellyStatus, User, RoleEnum
+from core import schemas
 
-from sqlalchemy import create_engine
-from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import sessionmaker
-
-from models import Base, ShellyStatus, User, RoleEnum
+# Import security utilities
 from security import hash_password, verify_password, create_access_token, decode_access_token
 
-# --- DB-Setup ---
-DATABASE_URL = os.getenv('DATABASE_URL')
-engine       = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(bind=engine)
+# Initialize database tables
+Base.metadata.create_all(bind=engine)
 
-# --- FastAPI & CORS ---
 app = FastAPI()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
-    allow_methods=["GET","POST","DELETE","OPTIONS"],
-    allow_headers=["*"],
-)
 
-# --- OAuth2 ---
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/token")
 
-@app.on_event("startup")
-def on_startup():
-    # 1) Tabellen anlegen (Retry)
-    for _ in range(10):
-        try:
-            Base.metadata.create_all(bind=engine)
-            break
-        except OperationalError:
-            time.sleep(2)
-    else:
-        raise RuntimeError("Could not connect to database")
+# Dependency: get DB session
 
-    # 2) Default-Admin anlegen, falls keine Users existieren
-    admin_user = os.getenv("ADMIN_USER")
-    admin_pass = os.getenv("ADMIN_PASS")
-    if admin_user and admin_pass:
-        db = SessionLocal()
-        if db.query(User).count() == 0:
-            new = User(
-                username        = admin_user,
-                hashed_password = hash_password(admin_pass),
-                role            = RoleEnum.admin
-            )
-            db.add(new)
-            db.commit()
-            print(f"[startup] Default admin '{admin_user}' angelegt.")
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
         db.close()
 
-# --- Pydantic-Modelle ---
-class ShellyIn(BaseModel):
-    sensor: dict
-    tmp:    dict
-    bat:    dict
+# Authenticate user credentials
 
-class UserCreate(BaseModel):
-    username: str
-    password: str
-    role:     RoleEnum
-
-# --- Helper: aktuellen User aus Token holen ---
-def get_current_user(token: str = Depends(oauth2_scheme)):
-    try:
-        payload  = decode_access_token(token)
-        username = payload.get("sub")
-        role     = payload.get("role")
-    except:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    db   = SessionLocal()
-    user = db.query(User).filter(User.username==username).first()
-    if not user or user.role.value!=role:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+def authenticate_user(db: Session, username: str, password: str):
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        return None
+    if not verify_password(password, user.password):
+        return None
     return user
 
-# --- Auth-Endpoints ---
-@app.post("/api/token")
-def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    db   = SessionLocal()
-    user = db.query(User).filter(User.username==form_data.username).first()
-    if not user or not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Incorrect username or password")
-    token = create_access_token({"sub": user.username, "role": user.role.value})
-    return {"access_token": token, "token_type": "bearer"}
-
-@app.post("/api/users")
-def create_user(u: UserCreate, current: User = Depends(get_current_user)):
-    if current.role != RoleEnum.admin:
-        raise HTTPException(status_code=403, detail="Not enough privileges")
-    db = SessionLocal()
-    new = User(username=u.username, hashed_password=hash_password(u.password), role=u.role)
-    db.add(new); db.commit(); db.refresh(new)
-    return {"id": new.id, "username": new.username, "role": new.role}
-
-@app.delete("/api/users/{user_id}")
-def delete_user(user_id: int, current: User = Depends(get_current_user)):
-    if current.role != RoleEnum.admin:
-        raise HTTPException(status_code=403, detail="Not enough privileges")
-    db   = SessionLocal()
-    user = db.query(User).get(user_id)
+# Token endpoint
+@app.post("/api/token", response_model=schemas.Token)
+def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token = create_access_token(username=user.username, role=user.role.value)
+    return {"access_token": access_token, "token_type": "bearer"}
+
+# Helper: retrieve current user from token
+async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    try:
+        payload = decode_access_token(token)
+        username: str = payload.get("sub")
+        role: str = payload.get("role")
+        if username is None or role is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    user = db.query(User).filter(User.username == username).first()
+    if user is None:
         raise HTTPException(status_code=404, detail="User not found")
-    db.delete(user); db.commit()
-    return {"detail": "deleted"}
+    return user
 
-# --- Dashboard & Logs ---
-@app.get("/api/door-status/latest")
-def latest_status(current: User = Depends(get_current_user)):
-    db  = SessionLocal()
-    obj = db.query(ShellyStatus).order_by(ShellyStatus.timestamp.desc()).first()
-    if not obj:
-        raise HTTPException(status_code=404, detail="No data")
-    age = datetime.utcnow() - obj.timestamp
-    return {
-        "timestamp": obj.timestamp,
-        "state":     obj.state,
-        "temp":      obj.temp,
-        "battery":   obj.battery,
-        "offline":   age > timedelta(seconds=30)
-    }
+# Endpoint: current user info
+@app.get("/api/users/me", response_model=schemas.UserRead)
+async def read_users_me(current_user: User = Depends(get_current_user)):
+    return current_user
 
-@app.get("/api/door-status/history")
-def history(current: User = Depends(get_current_user)):
-    if current.role not in (RoleEnum.auditor, RoleEnum.admin):
-        raise HTTPException(status_code=403, detail="Not enough privileges")
-    db = SessionLocal()
+# Endpoint: create new user (admin only)
+@app.post("/api/users", response_model=schemas.UserRead)
+def create_user(new: schemas.UserCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != RoleEnum.admin:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    user = User(username=new.username, password=hash_password(new.password), role=RoleEnum(new.role))
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+# Shelly status endpoints
+@app.get("/api/door-status/latest", response_model=schemas.ShellyStatusRead)
+def get_latest_status(db: Session = Depends(get_db)):
+    return db.query(ShellyStatus).order_by(ShellyStatus.timestamp.desc()).first()
+
+@app.get("/api/door-status/history", response_model=List[schemas.ShellyStatusRead])
+def get_history(db: Session = Depends(get_db)):
     return db.query(ShellyStatus).order_by(ShellyStatus.timestamp.desc()).limit(100).all()
 
-# --- Agent-Endpoint für Datenaufnahme ---
+# Webhook endpoint for simulator/agent
 @app.post("/api/shelly", status_code=201)
-def receive_shelly(data: ShellyIn):
-    db  = SessionLocal()
-    obj = ShellyStatus(state=data.sensor["state"], temp=data.tmp["value"], battery=data.bat["value"])
-    db.add(obj)
+def receive_shelly(status: schemas.ShellyStatusCreate, db: Session = Depends(get_db)):
+    record = ShellyStatus(**status.dict())
+    db.add(record)
     db.commit()
-    return {"id": obj.id}
+    return {"message": "Recorded"}
