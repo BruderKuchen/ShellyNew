@@ -1,24 +1,38 @@
-from fastapi import FastAPI, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
-from sqlalchemy.orm import Session
-from typing import List
+# core/app.py
 import os
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import List
 
-# Import your models and schemas
-from core.models import Base, engine, SessionLocal, ShellyStatus, User, RoleEnum
-from core import schemas
+from fastapi import (
+    FastAPI, Depends, HTTPException, status, Request
+)
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from jose import JWTError, jwt
+from pydantic import BaseModel
+from sqlalchemy import (
+    Column, Integer, String, Float, DateTime, Enum as SQLEnum, create_engine
+)
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
 
-# Import security utilities
-from security import hash_password, verify_password, create_access_token, decode_access_token
+# --- CONFIG ------------------------------------------------------------------
 
-# Initialize database tables
-Base.metadata.create_all(bind=engine)
+SECRET_KEY = os.getenv("JWT_SECRET", "changeme-in-prod")
+ALGORITHM    = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
-app = FastAPI()
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql+psycopg2://user:pass@db:5432/srmonitor"
+)
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/token")
+# --- DB SETUP ----------------------------------------------------------------
 
-# Dependency: get DB session
+engine = create_engine(DATABASE_URL, echo=False)
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+Base = declarative_base()
 
 def get_db():
     db = SessionLocal()
@@ -27,81 +41,165 @@ def get_db():
     finally:
         db.close()
 
-# Authenticate user credentials
+# --- MODELS ------------------------------------------------------------------
 
-def authenticate_user(db: Session, username: str, password: str):
-    user = db.query(User).filter(User.username == username).first()
-    if not user:
-        return None
-    if not verify_password(password, user.password):
-        return None
-    return user
+class RoleEnum(str, Enum):
+    viewer   = "viewer"
+    operator = "operator"
+    admin    = "admin"
 
-# Token endpoint
-@app.post("/api/token", response_model=schemas.Token)
-def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = authenticate_user(db, form_data.username, form_data.password)
-    if not user:
+class User(Base):
+    __tablename__ = "users"
+    id       = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=False)
+    role     = Column(SQLEnum(RoleEnum), default=RoleEnum.viewer, nullable=False)
+    created  = Column(DateTime, default=datetime.utcnow)
+
+class ShellyStatus(Base):
+    __tablename__ = "shelly_status"
+    id        = Column(Integer, primary_key=True, index=True)
+    state     = Column(String, nullable=False)
+    temp      = Column(Float, nullable=False)
+    battery   = Column(Float, nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
+# --- Pydantic Schemas --------------------------------------------------------
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    username: str
+    role: RoleEnum
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    role: RoleEnum = RoleEnum.viewer
+
+class UserOut(BaseModel):
+    id: int
+    username: str
+    role: RoleEnum
+    created: datetime
+    class Config:
+        orm_mode = True
+
+class StatusOut(BaseModel):
+    state: str
+    temp: float
+    battery: float
+    timestamp: datetime
+    class Config:
+        orm_mode = True
+
+# --- SECURITY HELPERS --------------------------------------------------------
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/token")
+
+def verify_password(plain: str, hashed: str) -> bool:
+    from passlib.context import CryptContext
+    pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    return pwd_ctx.verify(plain, hashed)
+
+def get_password_hash(password: str) -> str:
+    from passlib.context import CryptContext
+    pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    return pwd_ctx.hash(password)
+
+def create_access_token(data: dict, expires_delta: timedelta | None = None):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+def decode_access_token(token: str) -> TokenData:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return TokenData(username=payload.get("sub"), role=RoleEnum(payload.get("role")))
+    except JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
+            detail="Invalid authentication credentials",
         )
-    access_token = create_access_token(username=user.username, role=user.role.value)
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
+    tokdata = decode_access_token(token)
+    user = db.query(User).filter(User.username == tokdata.username).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+# --- APP & CORS --------------------------------------------------------------
+
+app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],                # im Prod bitte einschränken!
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- CREATE TABLES & DEFAULT ADMIN ------------------------------------------
+
+@app.on_event("startup")
+def on_startup():
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    if not db.query(User).filter_by(username="meinadmin").first():
+        admin = User(
+            username="meinadmin",
+            hashed_password=get_password_hash("sicherespasswort"),
+            role=RoleEnum.admin,
+        )
+        db.add(admin)
+        db.commit()
+    db.close()
+
+# --- AUTHENTICATION ----------------------------------------------------------
+
+@app.post("/api/token", response_model=Token)
+def login_for_token(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = db.query(User).filter_by(username=form.username).first()
+    if not user or not verify_password(form.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Falscher Benutzer oder Passwort")
+    access_token = create_access_token({"sub": user.username, "role": user.role.value})
     return {"access_token": access_token, "token_type": "bearer"}
 
-# Helper: retrieve current user from token
-async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    try:
-        payload = decode_access_token(token)
-        username: str = payload.get("sub")
-        role: str = payload.get("role")
-        if username is None or role is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    user = db.query(User).filter(User.username == username).first()
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
+# --- USER ENDPOINTS ----------------------------------------------------------
 
-# Endpoint: current user info
-@app.get("/api/users/me", response_model=schemas.UserRead)
-async def read_users_me(current_user: User = Depends(get_current_user)):
-    return current_user
+@app.post("/api/users", response_model=UserOut, status_code=201)
+def create_user(u: UserCreate, db: Session = Depends(get_db), me: User = Depends(get_current_user)):
+    if me.role != RoleEnum.admin:
+        raise HTTPException(status_code=403, detail="Keine Rechte")
+    if db.query(User).filter_by(username=u.username).first():
+        raise HTTPException(status_code=400, detail="User existiert schon")
+    new = User(
+        username=u.username,
+        hashed_password=get_password_hash(u.password),
+        role=u.role,
+    )
+    db.add(new); db.commit(); db.refresh(new)
+    return new
 
-# Endpoint: create new user (admin only)
-@app.post("/api/users", response_model=schemas.UserRead)
-def create_user(new: schemas.UserCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    if current_user.role != RoleEnum.admin:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
-    user = User(username=new.username, password=hash_password(new.password), role=RoleEnum(new.role))
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return user
+@app.get("/api/users/me", response_model=UserOut)
+def read_users_me(me: User = Depends(get_current_user)):
+    return me
 
-# Shelly status endpoints
-@app.get("/api/door-status/latest", response_model=schemas.ShellyStatusRead)
-def get_latest_status(db: Session = Depends(get_db)):
+# --- SHELLY STATUS ENDPOINTS ------------------------------------------------
+
+@app.post("/api/shelly", status_code=201)
+def ingest_shelly(s: StatusOut, db: Session = Depends(get_db)):
+    db.add(ShellyStatus(**s.dict())); db.commit()
+    return {"msg": "ok"}
+
+@app.get("/api/door-status/latest", response_model=StatusOut)
+def read_latest_status(db: Session = Depends(get_db)):
     return db.query(ShellyStatus).order_by(ShellyStatus.timestamp.desc()).first()
 
-@app.get("/api/door-status/history", response_model=List[schemas.ShellyStatusRead])
-def get_history(db: Session = Depends(get_db)):
-    return db.query(ShellyStatus).order_by(ShellyStatus.timestamp.desc()).limit(100).all()
-
-# Webhook endpoint for simulator/agent
-@app.post("/api/shelly", status_code=201)
-def receive_shelly(status: schemas.ShellyStatusCreate, db: Session = Depends(get_db)):
-    record = ShellyStatus(**status.dict())
-    db.add(record)
-    db.commit()
-    return {"message": "Recorded"}
+@app.get("/api/door-status/history", response_model=List[StatusOut])
+def read_history(db: Session = Depends(get_db)):
+    return db.query(ShellyStatus).order_by(ShellyStatus.timestamp.desc()).limit(50).all()
