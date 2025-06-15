@@ -1,0 +1,58 @@
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: srmonitor
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+  core:
+    build:
+      context: ./core
+    env_file:
+      - .env        # hier liegen deine SECRET_KEY, etc.
+    ports:
+      - "8000:8000"
+    networks:
+      - app-network
+
+  simulator:
+    build:
+      context: ./simulator
+    ports:
+      - "8080:80"
+    networks:
+      - app-network
+
+  agent:
+    build:
+      context: ./agent
+    environment:
+      SHELLY_IP: simulator
+      CORE_ENDPOINT: http://core:8000/api/shelly
+    depends_on:
+      - core
+      - simulator
+    networks:
+      - app-network
+
+  frontend:
+    build:
+      context: ./frontend
+    depends_on:
+      - core
+    ports:
+      - "3000:3000"
+    networks:
+      - app-network
+
+volumes:
+  db-data:
+
+networks:
+  app-network:
+    driver: bridge
