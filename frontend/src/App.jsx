@@ -380,26 +380,34 @@ export default function App() {
           {activeTab === "tickets" && renderTickets()}
         </div>
       </div>
-
+      {/* Floating help button */}
+      <button
+        onClick={() => setShowHelpPopup(true)}
+        className="fixed bottom-6 right-6 bg-blue-500 text-white p-4 rounded-full shadow-lg hover:bg-blue-600"
+        title="Need Help?">
+        <HelpCircle size={24} />
+      </button>
       {/* Help Popup */}
       {showHelpPopup && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-          <div className="bg-white p-6 rounded-lg relative max-w-sm">
-            <button
-              onClick={() => setShowHelpPopup(false)}
-              className="absolute top-2 right-2 text-gray-500"
-            >
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-8 rounded-xl relative max-w-md mx-4">
+            <button onClick={() => setShowHelpPopup(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
               <X size={20} />
             </button>
-            <HelpCircle size={48} className="mx-auto text-blue-500 mb-4" />
-            <h3 className="text-xl font-bold mb-2">Need Help?</h3>
-            <p className="mb-4">Hier deine Tipps oder Links.</p>
-            <button
-              onClick={() => setShowHelpPopup(false)}
-              className="px-4 py-2 bg-blue-500 text-white rounded"
-            >
-              Got it!
-            </button>
+            <div className="text-center space-y-4">
+              <HelpCircle size={48} className="text-blue-500 mx-auto" />
+              <h3 className="text-xl font-bold">Need Help? 🤔</h3>
+              <p className="text-gray-600">"If you have questions? Don't ask us... we don't know what we're doing either! 🤷‍♂️"</p>
+              <ul className="list-disc pl-5 text-left text-sm text-gray-700 space-y-1">
+                <li>Try turning it off and on again</li>
+                <li>Check if it's plugged in</li>
+                <li>Blame it on the intern</li>
+                <li>Coffee solves everything ☕</li>
+              </ul>
+              <button onClick={() => setShowHelpPopup(false)} className="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600">
+                Got it!
+              </button>
+            </div>
           </div>
         </div>
       )}
