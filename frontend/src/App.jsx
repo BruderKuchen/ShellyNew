@@ -23,9 +23,9 @@ export default function App() {
     password: "",
     role: "viewer",
   });
-  const [isOffline, setIsOffline] = useState(false);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [showHelpPopup, setShowHelpPopup] = useState(false);
+
   const API_BASE =
     import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`;
 
@@ -49,25 +49,13 @@ export default function App() {
     return "Viewer Dashboard";
   };
 
-  // Beim Start: Token auslesen
+  // Beim Start: vorhandenen Token prüfen
   useEffect(() => {
     const token = localStorage.getItem("token");
-    if (!token) return;
-    // Demo-Token?
-    if (token.startsWith("fake.")) {
-      try {
-        const [, payload] = token.split(".");
-        const { role } = JSON.parse(atob(payload));
-        setUser({ role });
-      } catch {
-        localStorage.removeItem("token");
-      }
-      return;
-    }
-    // Real-Token → rolle aus Backend oder JWT
-    fetchUserInfo(token);
+    if (token) fetchUserInfo(token);
   }, []);
 
+  // Userinfo aus Backend oder JWT ziehen
   const fetchUserInfo = async (token) => {
     try {
       const res = await fetch(`${API_BASE}/api/users/me`, {
@@ -76,43 +64,35 @@ export default function App() {
       if (res.ok) {
         const { role } = await res.json();
         setUser({ role });
-      } else {
-        // fallback JWT-decode
-        const [, payload] = token.split(".");
-        const decoded = JSON.parse(atob(payload));
-        setUser({ role: decoded.role || "viewer" });
+        return;
       }
+      // Fallback: Rolle aus JWT
+      const [, payload] = token.split(".");
+      const decoded = JSON.parse(atob(payload));
+      setUser({ role: decoded.role || "viewer" });
     } catch {
-      setUser({ role: "viewer" });
+      setUser(null);
     }
   };
 
-  // Daten abrufen
+  // Sensor-Status
   const fetchStatus = async () => {
     const token = localStorage.getItem("token");
-    if (!token || token.startsWith("fake.")) {
-      setStatus({ state: "closed", temp: 22.5, battery: 85, offline: true });
-      setIsOffline(true);
-      return;
-    }
     try {
       const res = await fetch(`${API_BASE}/api/door-status/latest`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
         setStatus(await res.json());
-        setIsOffline(false);
       }
     } catch {
-      setIsOffline(true);
+      setStatus(null);
     }
   };
+
+  // Verlauf
   const fetchHistory = async () => {
     const token = localStorage.getItem("token");
-    if (!token || token.startsWith("fake.")) {
-      setHistory([]);
-      return;
-    }
     try {
       const res = await fetch(`${API_BASE}/api/door-status/history`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -120,12 +100,21 @@ export default function App() {
       if (res.ok) setHistory(await res.json());
     } catch {}
   };
-  const fetchUsers = () => {
-    // hier echte API‐Route später
-    setUsers([]);
+
+  // Users (Admin-Tab)
+  const fetchUsers = async () => {
+    const token = localStorage.getItem("token");
+    try {
+      const res = await fetch(`${API_BASE}/api/users`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) setUsers(await res.json());
+    } catch {
+      setUsers([]);
+    }
   };
 
-  // Lifecycle: wenn user da, dann Daten holen + Polling
+  // Lifecycle: wenn user gesetzt, Daten holen + Polling
   useEffect(() => {
     if (!user) return;
     setActiveTab("dashboard");
@@ -156,157 +145,73 @@ export default function App() {
       alert("Fehler beim Anlegen");
     }
   };
+
   // User löschen
   const handleDeleteUser = (id) => {
     if (!confirm("Wirklich löschen?")) return;
     setUsers((u) => u.filter((x) => x.id !== id));
   };
 
-  // Login-Screen
-  if (!user) return <Login onLogin={() => setUser({ role: "viewer" })} />;
+  // wenn nicht eingeloggt
+  if (!user) return <Login onLogin={(role) => setUser({ role })} />;
 
-  // Lade-Spinner
-  if (!status)
+  // wenn noch kein Status geladen
+  if (status === null)
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin h-12 w-12 border-b-2 border-blue-600"></div>
       </div>
     );
 
-  // Icons
   const DoorIcon = status.state === "open" ? DoorOpen : DoorClosed;
   const navItems = getNavItems(user.role);
 
-  // *** Render-Funktionen für Tabs ***
+  // Render-Helper...
   const renderDashboard = () => (
     <Fragment>
       <h2 className="text-2xl font-bold mb-4">Live Measurements</h2>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="p-6 bg-white rounded-lg shadow text-center">
-          <DoorIcon size={48} className={status.state === "open" ? "text-red-500" : "text-green-500"} />
-          <p className="mt-2 text-xl capitalize">{status.state}</p>
-        </div>
-        <div className="p-6 bg-white rounded-lg shadow text-center">
-          <Thermometer size={48} className="text-blue-500" />
-          <p className="mt-2 text-xl">{status.temp}°C</p>
-        </div>
-        <div className="p-6 bg-white rounded-lg shadow text-center">
-          <BatteryFull size={48} className="text-green-500" />
-          <p className="mt-2 text-xl">{status.battery}%</p>
-        </div>
-      </div>
+      {/* … dein bestehender JSX-Code */}
     </Fragment>
   );
-
   const renderLogs = () => (
     <Fragment>
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-2xl font-bold">Measurement History</h2>
-        <button onClick={fetchHistory} className="px-4 py-2 bg-blue-500 text-white rounded">
-          Refresh
-        </button>
-      </div>
-      <ul className="bg-white rounded shadow divide-y">
-        {history.map((h, i) => (
-          <li key={i} className="p-4 flex justify-between">
-            <span>{new Date(h.timestamp).toLocaleString()}</span>
-            <span className={h.state === "open" ? "text-red-500" : "text-green-500"}>
-              {h.state}
-            </span>
-          </li>
-        ))}
-      </ul>
+      {/* … */}
     </Fragment>
   );
-
   const renderUsers = () => (
     <Fragment>
-      <h2 className="text-2xl font-bold mb-4">User Management</h2>
-      <form onSubmit={handleCreateUser} className="mb-6 space-y-2">
-        <input
-          placeholder="Username"
-          value={newUser.username}
-          onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
-          className="border p-2 rounded w-full"
-          required
-        />
-        <input
-          placeholder="Password"
-          type="password"
-          value={newUser.password}
-          onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-          className="border p-2 rounded w-full"
-          required
-        />
-        <select
-          value={newUser.role}
-          onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
-          className="border p-2 rounded w-full"
-        >
-          <option value="viewer">Viewer</option>
-          <option value="operator">Operator</option>
-          <option value="admin">Admin</option>
-        </select>
-        <button type="submit" className="px-4 py-2 bg-green-600 text-white rounded">
-          Create User
-        </button>
-      </form>
-      <table className="w-full bg-white rounded shadow divide-y">
-        <thead>
-          <tr className="bg-gray-100">
-            <th className="p-2 text-left">Username</th>
-            <th className="p-2 text-left">Role</th>
-            <th className="p-2 text-left">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {users.map((u) => (
-            <tr key={u.id}>
-              <td className="p-2">{u.username}</td>
-              <td className="p-2">{u.role}</td>
-              <td className="p-2">
-                {u.role !== "admin" && (
-                  <button onClick={() => handleDeleteUser(u.id)}>
-                    <Trash2 size={16} />
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {/* … */}
     </Fragment>
   );
-
   const renderTickets = () => (
     <div>
-      <h2 className="text-2xl font-bold mb-4">Tickets (coming soon)</h2>
-      <p>Integration mit Zammad o.Ä.</p>
+      {/* … */}
     </div>
   );
 
-  // *** UI ***
   return (
     <div className="min-h-screen bg-blue-50">
       <div className="max-w-4xl mx-auto p-6">
         {/* Header */}
         <div className="flex justify-between mb-6">
           <div>
-            <h1 className="text-3xl font-bold">{getDashboardTitle(user.role)}</h1>
-            <p>Role: <strong>{user.role}</strong></p>
+            <h1 className="text-3xl font-bold">
+              {getDashboardTitle(user.role)}
+            </h1>
+            <p>
+              Role: <strong>{user.role}</strong>
+            </p>
           </div>
           <button
             onClick={() => {
               localStorage.removeItem("token");
               setUser(null);
-              setActiveTab("dashboard");
             }}
             className="px-4 py-2 bg-red-500 text-white rounded"
           >
             Logout
           </button>
         </div>
-
         {/* Navigation */}
         <div className="mb-6 bg-white rounded shadow">
           <nav className="flex">
@@ -329,7 +234,6 @@ export default function App() {
             })}
           </nav>
         </div>
-
         {/* Content */}
         <div className="bg-white rounded shadow p-6">
           {activeTab === "dashboard" && renderDashboard()}
@@ -338,27 +242,10 @@ export default function App() {
           {activeTab === "tickets" && renderTickets()}
         </div>
       </div>
-
-      {/* Help Popup */}
+      {/* Help-Popup */}
       {showHelpPopup && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-          <div className="bg-white p-6 rounded-lg relative max-w-sm">
-            <button
-              onClick={() => setShowHelpPopup(false)}
-              className="absolute top-2 right-2 text-gray-500"
-            >
-              <X size={20} />
-            </button>
-            <HelpCircle size={48} className="mx-auto text-blue-500 mb-4" />
-            <h3 className="text-xl font-bold mb-2">Need Help?</h3>
-            <p className="mb-4">Hier deine Tipps oder Links.</p>
-            <button
-              onClick={() => setShowHelpPopup(false)}
-              className="px-4 py-2 bg-blue-500 text-white rounded"
-            >
-              Got it!
-            </button>
-          </div>
+          {/* … */}
         </div>
       )}
     </div>
