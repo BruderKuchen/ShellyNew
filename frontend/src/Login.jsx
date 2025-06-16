@@ -24,12 +24,8 @@ export default function Login({ onLogin }) {
     }
 
     const { access_token } = await res.json();
-    localStorage.setItem("token", access_token);
-
-    // Rolle aus JWT-Payload extrahieren
-    const [, payload] = access_token.split(".");
-    const { role } = JSON.parse(atob(payload));
-    onLogin(role);
+    // Gib jetzt den Token weiter an App.jsx
+    onLogin(access_token);
   };
 
   return (
@@ -75,7 +71,7 @@ export default function Login({ onLogin }) {
 
       <div className="credits">Dominik Bekesi, Sako Chadoian, Altay Celo</div>
 
-<style jsx>{`
+      <style jsx>{`
         .login-container {
           min-height: 100vh;
           position: relative;
@@ -268,4 +264,3 @@ export default function Login({ onLogin }) {
     </div>
   );
 }
-
