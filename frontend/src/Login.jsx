@@ -3,7 +3,7 @@ import { useState } from "react";
 export default function Login({ onLogin }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState(null);
+  const [error, setError]       = useState(null);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -23,9 +23,8 @@ export default function Login({ onLogin }) {
       return;
     }
 
-    const { access_token } = await res.json();
-    // Gib jetzt den Token weiter an App.jsx
-    onLogin(access_token);
+    const { access_token, refresh_token } = await res.json();
+    onLogin(access_token, refresh_token);
   };
 
   return (
@@ -71,7 +70,7 @@ export default function Login({ onLogin }) {
 
       <div className="credits">Dominik Bekesi, Sako Chadoian, Altay Celo</div>
 
-      <style jsx>{`
+       <style jsx>{`
         .login-container {
           min-height: 100vh;
           position: relative;
