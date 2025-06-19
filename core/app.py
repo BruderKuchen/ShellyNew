@@ -3,6 +3,8 @@ import time
 from datetime import datetime, timedelta
 from typing import List
 
+import requests
+
 from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -205,13 +207,34 @@ def history(current: User = Depends(get_current_user)):
 # --- Agent-Endpoint für Datenaufnahme ---
 @app.post("/api/shelly", status_code=201)
 def receive_shelly(data: ShellyIn):
-    db  = SessionLocal()
-    obj = ShellyStatus(
-        state=data.sensor["state"],
-        temp=data.tmp["value"],
-        battery=data.bat["value"],
-    )
-    db.add(obj)
-    db.commit()
-    db.close()
-    return {"id": obj.id}
+    db = SessionLocal()
+    try:
+        obj = ShellyStatus(
+            state=data.sensor["state"],
+            temp=data.tmp["value"],
+            battery=data.bat["value"],
+        )
+        db.add(obj)
+        db.commit()
+        db.refresh(obj)
+
+        if data.tmp["value"] > 24:
+            try:
+                r = requests.post(
+                    "http://ticket-service:5000/tickets",
+                    data={
+                        "title": "High Temperature Alert",
+                        "description": f"Temperature exceeded: {data.tmp['value']}°C",
+                        "temperature": data.tmp["value"]
+                    }
+                )
+                print(f"Ticket service responded: {r.status_code} {r.text}")
+            except Exception as e:
+                print(f"Error contacting ticket service: {e}")
+
+        return {"id": obj.id}
+
+    finally:
+        db.close()
+
+

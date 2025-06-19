@@ -60,8 +60,19 @@ services:
     networks:
       - app-network
 
+  ticket-service:
+    build:
+      context: ./ticket-service
+    ports:
+      - "5000:5000"
+    volumes:
+      - ticket-data:/app/data
+    networks:
+      - app-network
+
 volumes:
   db-data:
+  ticket-data:
 
 networks:
   app-network:

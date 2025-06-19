@@ -17,36 +17,47 @@ async def ping(host: str) -> bool:
 
 async def fetch_shelly(session: aiohttp.ClientSession) -> dict:
     url = f"http://{SHELLY_IP}/status"
-    async with async_timeout.timeout(5):
-        resp = await session.get(url)
-        return await resp.json()
+    try:
+        async with async_timeout.timeout(5):
+            async with session.get(url) as resp:
+                resp.raise_for_status()
+                return await resp.json()
+    except Exception as e:
+        print(f"[ERROR] Shelly fetch failed: {e}")
+        return {}
 
 async def send_to_core(session: aiohttp.ClientSession, data: dict):
+    if not data:
+        return  # skip empty data
     try:
-        await session.post(CORE_ENDPOINT, json=data)
+        async with session.post(CORE_ENDPOINT, json=data) as resp:
+            resp.raise_for_status()
+            print(f"[INFO] Sent data to core, response: {resp.status}")
     except Exception as e:
-        print(f"[WARN] Konnte nicht an Core senden: {e}")
+        print(f"[WARN] Could not send to Core: {e}")
 
 async def main_loop():
     async with aiohttp.ClientSession() as session:
-        # einmal sofort prüfen
+        # initial check
         try:
             if await ping(SHELLY_IP):
                 data = await fetch_shelly(session)
                 await send_to_core(session, data)
+            else:
+                print(f"[INFO] {SHELLY_IP} not reachable at startup.")
         except Exception as e:
-            print(f"[ERROR] Agent-Start-Fehler: {e}")
+            print(f"[ERROR] Agent startup error: {e}")
 
-        # dann alle 5 Sekunden
+        # periodic check
         while True:
             try:
                 if await ping(SHELLY_IP):
                     data = await fetch_shelly(session)
                     await send_to_core(session, data)
                 else:
-                    print(f"[INFO] {SHELLY_IP} nicht erreichbar.")
+                    print(f"[INFO] {SHELLY_IP} not reachable.")
             except Exception as e:
-                print(f"[ERROR] Agent-Loop-Fehler: {e}")
+                print(f"[ERROR] Agent loop error: {e}")
             await asyncio.sleep(5)
 
 if __name__ == "__main__":

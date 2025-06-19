@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Ticket System</title>
+  <style>
+    body { font-family: sans-serif; margin: 2rem; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    th, td { border: 1px solid #ccc; padding: 0.5rem; text-align: left; }
+    th { background: #f0f0f0; }
+    form { margin-bottom: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>Tickets</h1>
+  <form method="post" action="/tickets">
+    <input name="title" placeholder="Title" required>
+    <input name="description" placeholder="Description" required>
+    <input name="temperature" type="number" step="0.1" placeholder="Temperature" required>
+    <button type="submit">Create Ticket</button>
+  </form>
+  <table>
+    <thead>
+      <tr><th>ID</th><th>Title</th><th>Description</th><th>Temperature</th></tr>
+    </thead>
+    <tbody>
+      {% for t in tickets %}
+      <tr>
+        <td>{{ t.id }}</td>
+        <td>{{ t.title }}</td>
+        <td>{{ t.description }}</td>
+        <td>{{ t.temperature }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>
