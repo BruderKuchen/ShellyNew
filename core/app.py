@@ -1,4 +1,5 @@
-import os, time
+import os
+import time
 from datetime import datetime, timedelta
 from typing import List
 
@@ -13,28 +14,37 @@ from sqlalchemy.orm import sessionmaker
 
 from models import Base, ShellyStatus, User, RoleEnum
 from security import (
-    hash_password, verify_password,
-    create_access_token, create_refresh_token, decode_token
+    hash_password,
+    verify_password,
+    create_access_token,
+    create_refresh_token,
+    decode_token,
 )
 
-# DB
+# --- DB-Setup ---
 DATABASE_URL = os.getenv("DATABASE_URL")
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine)
 
-# FastAPI + CORS
+# --- FastAPI & CORS ---
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "https://localhost:3000",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_credentials=True,
 )
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/token")
 
+# --- Startup: Tabellen & Default-Admin ---
 @app.on_event("startup")
 def on_startup():
+    # Tabellen anlegen (mit Retry)
     for _ in range(10):
         try:
             Base.metadata.create_all(bind=engine)
@@ -43,6 +53,8 @@ def on_startup():
             time.sleep(2)
     else:
         raise RuntimeError("DB connect failed")
+
+    # Default-Admin anlegen, falls keine User existieren
     admin_user = os.getenv("ADMIN_USER")
     admin_pass = os.getenv("ADMIN_PASS")
     if admin_user and admin_pass:
@@ -56,7 +68,7 @@ def on_startup():
             db.commit()
         db.close()
 
-# Pydantic
+# --- Pydantic-Modelle ---
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
@@ -84,27 +96,26 @@ class ShellyIn(BaseModel):
     tmp:    dict
     bat:    dict
 
-# Auth helper
+# --- Helper: aktuellen User aus Token holen ---
 def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
     try:
         payload  = decode_token(token)
         username = payload.get("sub")
         role     = payload.get("role")
-    except:
+    except Exception:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
     db = SessionLocal()
-    user = db.query(User).filter(User.username==username).first()
+    user = db.query(User).filter(User.username == username).first()
     db.close()
     if not user or user.role.value != role:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     return user
 
-# --- Auth Endpoints ---
-
+# --- Auth-Endpoints ---
 @app.post("/api/token", response_model=TokenResponse)
 def login(form_data: OAuth2PasswordRequestForm = Depends()):
     db   = SessionLocal()
-    user = db.query(User).filter(User.username==form_data.username).first()
+    user = db.query(User).filter(User.username == form_data.username).first()
     db.close()
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Wrong username or password")
@@ -118,20 +129,21 @@ def refresh_token(req: RefreshRequest):
         payload  = decode_token(req.refresh_token)
         username = payload["sub"]
         role     = payload["role"]
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
     new_access = create_access_token({"sub": username, "role": role})
     return {"access_token": new_access, "token_type": "bearer"}
 
-# --- User Endpoints ---
-
+# --- User-Management ---
 @app.post("/api/users", response_model=UserOut)
 def create_user(u: UserCreate, current: User = Depends(get_current_user)):
     if current.role != RoleEnum.admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     db = SessionLocal()
     new = User(username=u.username, hashed_password=hash_password(u.password), role=u.role)
-    db.add(new); db.commit(); db.refresh(new)
+    db.add(new)
+    db.commit()
+    db.refresh(new)
     out = {"id": new.id, "username": new.username, "role": new.role.value}
     db.close()
     return out
@@ -154,16 +166,17 @@ def read_me(current: User = Depends(get_current_user)):
 def delete_user(user_id: int, current: User = Depends(get_current_user)):
     if current.role != RoleEnum.admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-    db   = SessionLocal()
+    db = SessionLocal()
     user = db.query(User).get(user_id)
     if not user:
         db.close()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    db.delete(user); db.commit(); db.close()
-    return {"detail":"deleted"}
+    db.delete(user)
+    db.commit()
+    db.close()
+    return {"detail": "deleted"}
 
 # --- Dashboard & Logs ---
-
 @app.get("/api/door-status/latest")
 def latest_status(current: User = Depends(get_current_user)):
     db  = SessionLocal()
@@ -177,7 +190,7 @@ def latest_status(current: User = Depends(get_current_user)):
         "state":     obj.state,
         "temp":      obj.temp,
         "battery":   obj.battery,
-        "offline":   age > timedelta(seconds=30)
+        "offline":   age > timedelta(seconds=30),
     }
 
 @app.get("/api/door-status/history")
@@ -189,9 +202,16 @@ def history(current: User = Depends(get_current_user)):
     db.close()
     return data
 
+# --- Agent-Endpoint für Datenaufnahme ---
 @app.post("/api/shelly", status_code=201)
 def receive_shelly(data: ShellyIn):
     db  = SessionLocal()
-    obj = ShellyStatus(state=data.sensor["state"], temp=data.tmp["value"], battery=data.bat["value"])
-    db.add(obj); db.commit(); db.close()
+    obj = ShellyStatus(
+        state=data.sensor["state"],
+        temp=data.tmp["value"],
+        battery=data.bat["value"],
+    )
+    db.add(obj)
+    db.commit()
+    db.close()
     return {"id": obj.id}

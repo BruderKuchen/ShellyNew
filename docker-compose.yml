@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   db:
     image: postgres:15
@@ -14,7 +16,7 @@ services:
     build:
       context: ./core
     env_file:
-      - .env        # hier liegen deine SECRET_KEY, etc.
+      - .env
     ports:
       - "8000:8000"
     networks:
@@ -43,10 +45,18 @@ services:
   frontend:
     build:
       context: ./frontend
+    volumes:
+      - ./frontend/localhost+2.pem:/app/localhost+2.pem:ro
+      - ./frontend/localhost+2-key.pem:/app/localhost+2-key.pem:ro
     depends_on:
       - core
     ports:
       - "3000:3000"
+    command: >
+      npx serve dist
+        -l 3000
+        --ssl-cert /app/localhost+2.pem
+        --ssl-key /app/localhost+2-key.pem
     networks:
       - app-network
 
