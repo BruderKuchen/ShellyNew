@@ -218,6 +218,7 @@ def receive_shelly(data: ShellyIn):
         db.commit()
         db.refresh(obj)
 
+        # Trigger 1: High temperature
         if data.tmp["value"] > 24:
             try:
                 r = requests.post(
@@ -226,15 +227,37 @@ def receive_shelly(data: ShellyIn):
                         "title": "High Temperature Alert",
                         "description": f"Temperature exceeded: {data.tmp['value']}°C",
                         "temperature": data.tmp["value"]
+                    },
+                    headers={
+                        "Authorization": "Bearer lab-secret-123"
                     }
                 )
                 print(f"Ticket service responded: {r.status_code} {r.text}")
             except Exception as e:
                 print(f"Error contacting ticket service: {e}")
 
+        # ✅ Trigger 2: Door opened
+        if data.sensor["state"] == "open":
+            try:
+                r = requests.post(
+                    "http://ticket-service:5000/tickets",
+                    data={
+                        "title": "Door Opened",
+                        "description": "The door has been opened.",
+                        "state": "open"
+                    },
+                    headers={
+                        "Authorization": "Bearer lab-secret-123"
+                    }
+                )
+                print(f"Door-open ticket: {r.status_code} {r.text}")
+            except Exception as e:
+                print(f"Error sending door-open ticket: {e}")
+
         return {"id": obj.id}
 
     finally:
         db.close()
+
 
 
