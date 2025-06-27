@@ -34,7 +34,7 @@ services:
     build:
       context: ./agent
     environment:
-      SHELLY_IP: 172.20.10.3
+      SHELLY_IP: simulator
       CORE_ENDPOINT: http://core:8000/api/shelly
     depends_on:
       - core
@@ -45,10 +45,9 @@ services:
   frontend:
     build:
       context: ./frontend
-    # Zertifikate aus ./crt mounten
     volumes:
-      - ./crt/localhost+2.pem:/app/localhost+2.pem:ro
-      - ./crt/localhost+2-key.pem:/app/localhost+2-key.pem:ro
+      - ./frontend/localhost+2.pem:/app/localhost+2.pem:ro
+      - ./frontend/localhost+2-key.pem:/app/localhost+2-key.pem:ro
     depends_on:
       - core
     ports:
@@ -64,18 +63,10 @@ services:
   ticket-service:
     build:
       context: ./ticket-service
-    # Zertifikate ebenfalls aus ./crt mounten
-    volumes:
-      - ./crt/localhost+2.pem:/app/localhost+2.pem:ro
-      - ./crt/localhost+2-key.pem:/app/localhost+2-key.pem:ro
     ports:
       - "5000:5000"
-    command: >
-      flask run
-        --host=0.0.0.0
-        --port=5000
-        --cert=/app/localhost+2.pem
-        --key=/app/localhost+2-key.pem
+    volumes:
+      - ticket-data:/app/data
     networks:
       - app-network
 
