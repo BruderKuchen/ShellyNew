@@ -1,0 +1,91 @@
+## ShellyNew Project Documentation
+
+### Übersicht
+ShellyNew ist eine modulare Microservices-Anwendung zur Erfassung und Verarbeitung von Sensordaten eines Shelly-Geräts sowie zur Verwaltung von Tickets. Die Architektur besteht aus folgenden Diensten:
+
+- **Database (db)**: PostgreSQL–Datenbank  
+- **Core**: FastAPI-Service zur Authentifizierung und Speicherung der Sensordaten  
+- **Simulator**: Python-Service, simuliert Shelly-Sensor-Daten  
+- **Agent**: Python-Service, liest Daten vom realen Shelly-Sensor und sendet sie an Core  
+- **Frontend**: React-Anwendung (serviert via `serve`) mit SSL  
+- **Ticket-Service**: Python/Flask-Service zur Ticketverwaltung (jetzt auf Port 4000)  
+
+Alle Dienste laufen in Docker-Containern und kommunizieren über ein eigenes Bridged-Netzwerk.
+
+---
+
+### Inhaltsverzeichnis
+1. [Projektstruktur](#projektstruktur)  
+2. [Klassendiagramm](#klassendiagramm)  
+
+---
+
+### Projektstruktur
+```
+ShellyNew-main/
+├── .env
+├── docker-compose.yml
+├── core/
+│   ├── Dockerfile
+│   ├── app.py
+│   └── security.py
+├── simulator/
+│   ├── Dockerfile
+│   └── main.py
+├── agent/
+│   ├── Dockerfile
+│   └── main.py
+├── frontend/
+│   ├── Dockerfile
+│   ├── vite.config.js
+│   └── src/…
+├── ticket-service/
+│   ├── Dockerfile
+│   ├── app.py
+│   └── models.py
+├── crt/
+│   ├── localhost+2.pem
+│   └── localhost+2-key.pem
+└── fixes.patch
+```
+
+**Hinweis:** In `docker-compose.yml` ist im `agent`-Service unter `environment` standardmäßig  
+```yaml
+SHELLY_IP: simulator
+```  
+eingetragen. Ändere dies auf die IP deines echten Shelly-Sensors, z. B.  
+```yaml
+SHELLY_IP: 172.20.10.3
+```
+
+---
+
+### Klassendiagramm
+```mermaid
+classDiagram
+    class ShellyIn {
+        +dict tmp
+        +dict hum
+    }
+    class Agent {
+        +fetch_shelly(): dict
+        +send_to_core(data): dict
+    }
+    class CoreApp {
+        +verify_agent_token(creds): void
+        +receive_shelly(data): dict
+    }
+    class Security {
+        +SECRET_KEY: str
+        +create_access_token(data): str
+        +verify_token(token): dict | None
+    }
+    class FrontendServer {
+        +serve dist with SSL cert/key
+    }
+
+    ShellyIn <|.. CoreApp : uses
+    Agent --> CoreApp : POST /api/shelly with Bearer
+    CoreApp ..> Security : depends on
+    FrontendServer ..> crt : loads certs
+```
