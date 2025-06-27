@@ -63,10 +63,19 @@ services:
   ticket-service:
     build:
       context: ./ticket-service
+    # Zertifikate mounten:
+    volumes:
+      - ./frontend/localhost+2.pem:/app/localhost+2.pem:ro
+      - ./frontend/localhost+2-key.pem:/app/localhost+2-key.pem:ro
     ports:
       - "5000:5000"
-    volumes:
-      - ticket-data:/app/data
+    # Hier wird SSL aktiviert – passe den Befehl ggf. an dein Framework an:
+    command: >
+      flask run
+        --host=0.0.0.0
+        --port=5000
+        --cert=/app/localhost+2.pem
+        --key=/app/localhost+2-key.pem
     networks:
       - app-network
 
