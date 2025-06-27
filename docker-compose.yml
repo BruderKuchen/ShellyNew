@@ -34,7 +34,7 @@ services:
     build:
       context: ./agent
     environment:
-      SHELLY_IP: simulator
+      SHELLY_IP: 172.20.10.3
       CORE_ENDPOINT: http://core:8000/api/shelly
     depends_on:
       - core
