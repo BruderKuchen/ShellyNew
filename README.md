@@ -98,6 +98,4 @@ export COMPOSE_DOCKER_CLI_BUILD=0
 
 	•	Fehlendes SSL-Zertifikat: Prüfen, ob Zertifikate im crt/-Ordner vorhanden sind.
 
-Lizenz
 
-Dieses Projekt steht unter der MIT-Lizenz.
