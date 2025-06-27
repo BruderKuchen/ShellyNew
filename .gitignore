@@ -1,0 +1,13 @@
+# Environment
+.env
+
+# Docker
+db-data/
+
+# Python
+__pycache__/
+*.pyc
+
+# Node / Frontend
+node_modules/
+dist/
