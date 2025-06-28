@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import List
 
 import requests
+from requests.auth import HTTPBasicAuth
 
 from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,6 +23,10 @@ from security import (
     create_refresh_token,
     decode_token,
 )
+from dotenv import load_dotenv
+
+# --- ENV laden ---
+load_dotenv()
 
 # --- DB-Setup ---
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -35,6 +40,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "https://localhost:3000",
+        "http://localhost:5173",
+        "https://localhost:5173",
     ],
     allow_methods=["*"],
     allow_headers=["*"],
@@ -46,7 +53,6 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/token")
 # --- Startup: Tabellen & Default-Admin ---
 @app.on_event("startup")
 def on_startup():
-    # Tabellen anlegen (mit Retry)
     for _ in range(10):
         try:
             Base.metadata.create_all(bind=engine)
@@ -56,7 +62,6 @@ def on_startup():
     else:
         raise RuntimeError("DB connect failed")
 
-    # Default-Admin anlegen, falls keine User existieren
     admin_user = os.getenv("ADMIN_USER")
     admin_pass = os.getenv("ADMIN_PASS")
     if admin_user and admin_pass:
@@ -218,46 +223,26 @@ def receive_shelly(data: ShellyIn):
         db.commit()
         db.refresh(obj)
 
-        # Trigger 1: High temperature
         if data.tmp["value"] > 24:
             try:
                 r = requests.post(
-                    "http://ticket-service:5000/tickets",
-                    data={
+                    "https://ticket-service:5001/api/tickets",
+                    json={
                         "title": "High Temperature Alert",
                         "description": f"Temperature exceeded: {data.tmp['value']}°C",
                         "temperature": data.tmp["value"]
                     },
-                    headers={
-                        "Authorization": "Bearer lab-secret-123"
-                    }
+                    auth=HTTPBasicAuth(
+                        os.getenv("TICKET_USER"),
+                        os.getenv("TICKET_PASS")
+                    ),
+                    verify=False  # ⚠️ Nur in DEV
                 )
                 print(f"Ticket service responded: {r.status_code} {r.text}")
             except Exception as e:
                 print(f"Error contacting ticket service: {e}")
 
-        # ✅ Trigger 2: Door opened
-        if data.sensor["state"] == "open":
-            try:
-                r = requests.post(
-                    "http://ticket-service:5000/tickets",
-                    data={
-                        "title": "Door Opened",
-                        "description": "The door has been opened.",
-                        "state": "open"
-                    },
-                    headers={
-                        "Authorization": "Bearer lab-secret-123"
-                    }
-                )
-                print(f"Door-open ticket: {r.status_code} {r.text}")
-            except Exception as e:
-                print(f"Error sending door-open ticket: {e}")
-
         return {"id": obj.id}
 
     finally:
         db.close()
-
-
-

@@ -10,7 +10,7 @@ export default function Login({ onLogin }) {
     setError(null);
 
     const res = await fetch(
-      `${import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`}/api/token`,
+      `${import.meta.env.VITE_API_BASE || `https://${window.location.hostname}:8000`}/api/token`,
       {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },

@@ -3,9 +3,16 @@ import aiohttp
 import async_timeout
 import subprocess
 import os
+import ssl
 
-SHELLY_IP = os.getenv('SHELLY_IP', 'simulator')
-CORE_ENDPOINT = os.getenv('CORE_ENDPOINT', 'http://core:8000/api/shelly')
+# Nutze den Simulator als Shelly-Quelle
+SHELLY_IP = os.getenv("SHELLY_IP", "simulator")
+CORE_ENDPOINT = os.getenv('CORE_ENDPOINT', 'https://core:8000/api/shelly')
+
+# SSL-Kontext für selbstsignierte Zertifikate (nur für Entwicklung!)
+ssl_ctx = ssl.create_default_context()
+ssl_ctx.check_hostname = False
+ssl_ctx.verify_mode = ssl.CERT_NONE
 
 async def ping(host: str) -> bool:
     result = subprocess.run(
@@ -30,7 +37,7 @@ async def send_to_core(session: aiohttp.ClientSession, data: dict):
     if not data:
         return  # skip empty data
     try:
-        async with session.post(CORE_ENDPOINT, json=data) as resp:
+        async with session.post(CORE_ENDPOINT, json=data, ssl=ssl_ctx) as resp:
             resp.raise_for_status()
             print(f"[INFO] Sent data to core, response: {resp.status}")
     except Exception as e:

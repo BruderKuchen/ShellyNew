@@ -15,3 +15,8 @@ export async function login(username, password) {
   }
   return res.json()  // { access_token, token_type }
 }
+
+//Die Funktion login sendet einen POST-Request 
+// an /api/token mit Benutzername und Passwort, um ein Token vom 
+// Backend zu erhalten.
+

@@ -1,8 +1,12 @@
+import os
+from dotenv import load_dotenv
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
 import jwt
 
-SECRET_KEY = "6710a8afe1eb20997475f96631f438c3e273e9dc44fbc77d1cef04f283eb68f6"
+load_dotenv()  # .env-Datei laden
+
+SECRET_KEY = os.getenv("SECRET_KEY", "fallback-secret-key")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
 REFRESH_TOKEN_EXPIRE_DAYS    = 7

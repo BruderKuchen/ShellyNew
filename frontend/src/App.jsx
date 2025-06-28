@@ -15,20 +15,21 @@ import {
 
 export default function App() {
   // ─── State Hooks ─────────────────────────────────────────
-  const [status, setStatus]       = useState(null);
-  const [user, setUser]           = useState(null);
-  const [history, setHistory]     = useState([]);
-  const [users, setUsers]         = useState([]);
-  const [newUser, setNewUser]     = useState({ username: "", password: "", role: "viewer" });
-  const [activeTab, setActiveTab] = useState("dashboard");
-  const [showHelpPopup, setShowHelpPopup] = useState(false);
+  const [status, setStatus]       = useState(null);   // Aktueller Türstatus
+  const [user, setUser]           = useState(null);   // Eingeloggter Benutzer
+  const [history, setHistory]     = useState([]);     // Verlauf der Türstatus
+  const [users, setUsers]         = useState([]);     // Benutzerliste
+  const [newUser, setNewUser]     = useState({ username: "", password: "", role: "viewer" }); // Neuer Benutzer
+  const [activeTab, setActiveTab] = useState("dashboard"); // Aktiver Tab
+  const [showHelpPopup, setShowHelpPopup] = useState(false); // Hilfe-Popup
 
-  const API_BASE = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`;
+  // Basis-URL für API-Requests (immer HTTPS als Fallback!)
+  const API_BASE = import.meta.env.VITE_API_BASE || `https://${window.location.hostname}:8000`;
 
-  // ─── Handle Login & fetch “real” role ─────────────────────
+  // ─── Login-Handler: Token speichern & Rolle laden ───────
   const handleLogin = async (token) => {
     localStorage.setItem("token", token);
-    // GET /users/me
+    // Versuche, die Rolle vom Backend zu holen
     try {
       const res = await fetch(`${API_BASE}/api/users/me`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -39,7 +40,7 @@ export default function App() {
         return;
       }
     } catch {}
-    // fallback JWT
+    // Fallback: Rolle aus JWT-Token extrahieren
     try {
       const [, payload] = token.split(".");
       const { role } = JSON.parse(atob(payload));
@@ -49,7 +50,7 @@ export default function App() {
     }
   };
 
-  // ─── on mount: load token & user ────────────────────────
+  // ─── Beim Laden: Token prüfen & User setzen ─────────────
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) return;
@@ -66,7 +67,7 @@ export default function App() {
     }
   }, []);
 
-  // ─── fetchers ───────────────────────────────────────────
+  // ─── Daten vom Backend holen ─────────────────────────────
   const fetchStatus = async () => {
     const token = localStorage.getItem("token");
     try {
@@ -100,18 +101,18 @@ export default function App() {
     } catch {}
   };
 
-  // ─── when user arrives: prime all data ──────────────────
+  // ─── Wenn User eingeloggt: Daten laden & Status poll-en ─
   useEffect(() => {
     if (!user) return;
     setActiveTab("dashboard");
     fetchStatus();
     fetchHistory();
     fetchUsers();
-    const iv = setInterval(fetchStatus, 5000);
+    const iv = setInterval(fetchStatus, 5000); // Status alle 5s aktualisieren
     return () => clearInterval(iv);
   }, [user]);
 
-  // ─── User-Management ────────────────────────────────────
+  // ─── Benutzerverwaltung ────────────────────────────────
   const handleCreateUser = async (e) => {
     e.preventDefault();
     const token = localStorage.getItem("token");
@@ -137,7 +138,7 @@ export default function App() {
     fetchUsers();
   };
 
-  // ─── Navigation & Titles ────────────────────────────────
+  // ─── Navigation & Titel ────────────────────────────────
   const getNavItems = (role) => {
     const items = [{ id: "dashboard",   label: "Dashboard",      icon: BarChart3 }];
     if (role === "auditor" || role === "admin")
@@ -154,10 +155,10 @@ export default function App() {
     return "Viewer Dashboard";
   };
 
-  // ─── redirect to login if no user ──────────────────────
+  // ─── Login-Ansicht ─────────────────────────────────────
   if (!user) return <Login onLogin={handleLogin} />;
 
-  // ─── loader while initial status missing ───────────────
+  // ─── Ladeanzeige ───────────────────────────────────────
   if (!status) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -169,7 +170,7 @@ export default function App() {
   const DoorIcon = status.state === "open" ? DoorOpen : DoorClosed;
   const navItems = getNavItems(user.role);
 
-  // ─── Render Fns ────────────────────────────────────────
+  // ─── Dashboard ─────────────────────────────────────────
   const renderDashboard = () => (
     <Fragment>
       <h2 className="text-2xl font-bold mb-4">Live Measurements</h2>
@@ -190,6 +191,7 @@ export default function App() {
     </Fragment>
   );
 
+  // ─── Logs ──────────────────────────────────────────────
   const renderLogs = () => (
     <Fragment>
       <div className="flex justify-between items-center mb-4">
@@ -209,6 +211,7 @@ export default function App() {
     </Fragment>
   );
 
+  // ─── Benutzerverwaltung ────────────────────────────────
   const renderUsers = () => (
     <Fragment>
       <h2 className="text-2xl font-bold mb-4">User Management</h2>
@@ -266,6 +269,7 @@ export default function App() {
     </Fragment>
   );
 
+  // ─── Tickets (Platzhalter) ─────────────────────────────
   const renderTickets = () => (
     <Fragment>
       <h2 className="text-2xl font-bold mb-4">Tickets (coming soon)</h2>
@@ -273,7 +277,7 @@ export default function App() {
     </Fragment>
   );
 
-  // ─── Main UI ────────────────────────────────────────────
+  // ─── Haupt-UI ──────────────────────────────────────────
   return (
     <div className="min-h-screen bg-blue-50">
       <div className="max-w-4xl mx-auto p-6">
@@ -294,7 +298,7 @@ export default function App() {
           </button>
         </div>
 
-        {/* Nav */}
+        {/* Navigation */}
         <div className="mb-6 bg-white rounded shadow">
           <nav className="flex">
             {navItems.map(it => {
@@ -326,7 +330,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* Help Button */}
+      {/* Hilfe-Button */}
       <button
         onClick={() => setShowHelpPopup(true)}
         className="fixed bottom-6 right-6 bg-blue-500 p-4 text-white rounded-full shadow-lg hover:bg-blue-600"
@@ -334,7 +338,7 @@ export default function App() {
         <HelpCircle size={24} />
       </button>
 
-      {/* Help Popup */}
+      {/* Hilfe-Popup */}
       {showHelpPopup && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white p-8 rounded-xl max-w-md mx-4 relative">

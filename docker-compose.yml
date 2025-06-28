@@ -9,6 +9,8 @@ services:
       POSTGRES_DB: srmonitor
     volumes:
       - db-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
     networks:
       - app-network
 
@@ -16,9 +18,31 @@ services:
     build:
       context: ./core
     env_file:
-      - .env
+      - .env  # <-- Pfad korrekt, weil .env im selben Verzeichnis wie docker-compose.yml
+    volumes:
+      - ./core/localhost+2.pem:/app/localhost+2.pem:ro
+      - ./core/localhost+2-key.pem:/app/localhost+2-key.pem:ro
+    command: >
+      uvicorn app:app --host 0.0.0.0 --port 8000
+      --ssl-keyfile /app/localhost+2-key.pem
+      --ssl-certfile /app/localhost+2.pem
     ports:
       - "8000:8000"
+    working_dir: /app
+    depends_on:
+      - db
+    networks:
+      - app-network
+
+  agent:
+    build:
+      context: ./agent
+    environment:
+      SHELLY_IP: 172.20.10.4
+      CORE_ENDPOINT: https://core:8000/api/shelly
+    depends_on:
+      - core
+      - simulator
     networks:
       - app-network
 
@@ -27,18 +51,6 @@ services:
       context: ./simulator
     ports:
       - "8080:80"
-    networks:
-      - app-network
-
-  agent:
-    build:
-      context: ./agent
-    environment:
-      SHELLY_IP: simulator
-      CORE_ENDPOINT: http://core:8000/api/shelly
-    depends_on:
-      - core
-      - simulator
     networks:
       - app-network
 
@@ -64,11 +76,19 @@ services:
     build:
       context: ./ticket-service
     ports:
-      - "5000:5000"
+    - "5001:5001"
     volumes:
-      - ticket-data:/app/data
+    - ticket-data:/app/data
+    - ./ticket-service/localhost+2.pem:/app/localhost+2.pem:ro
+    - ./ticket-service/localhost+2-key.pem:/app/localhost+2-key.pem:ro
+    env_file:
+    - .env
+    command: >
+      uvicorn app:app --host 0.0.0.0 --port 5001
+      --ssl-keyfile /app/localhost+2-key.pem
+      --ssl-certfile /app/localhost+2.pem
     networks:
-      - app-network
+    - app-network
 
 volumes:
   db-data:

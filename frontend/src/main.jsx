@@ -8,3 +8,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <App />
   </React.StrictMode>
 );
+
+
+// Einstiegspunkt der React-App: 
+// Rendert <App /> in das Root-Element 
+// und bindet globale Styles ein.
